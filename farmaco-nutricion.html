@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farma Básica — Metformina · Farmaco-nutrición</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header__text">
+        <h1 class="header__title" id="drug-title">Metformina</h1>
+        <p class="header__subtitle" id="drug-subtitle"></p>
+      </div>
+      <span class="header__badge" id="module-badge">Módulo: Farmaco-nutrición</span>
+    </header>
+
+    <main class="main main--nutrition">
+      <section class="nutrition-panel" aria-label="Alteraciones farmaco-nutricionales">
+        <h2 class="nutrition-panel__heading">Cascada causa-efecto</h2>
+        <p class="nutrition-panel__source" id="nutrition-source"></p>
+        <nav class="nutrition-categories" id="nutrition-categories" aria-label="Categorías farmaco-nutricionales"></nav>
+      </section>
+
+      <aside class="study-panel" aria-live="polite">
+        <article class="study-card" id="nutrition-card">
+          <header class="study-card__header">
+            <span class="study-card__step" id="nutrition-category-label">Categoría</span>
+            <h2 class="study-card__title" id="nutrition-title"></h2>
+          </header>
+          <ol class="study-card__cascade" id="nutrition-cascade"></ol>
+          <div class="study-card__tip" id="nutrition-tip">
+            <span class="study-card__tip-label">Ojo Clínico / Tip de Examen</span>
+            <p class="study-card__tip-text" id="nutrition-tip-text"></p>
+          </div>
+        </article>
+      </aside>
+    </main>
+
+    <footer class="abbrev-bar">
+      <p class="abbrev-bar__label">Abreviaturas farmaco-nutricionales</p>
+      <ul class="abbrev-bar__chips" id="abbrev-chips"></ul>
+      <nav class="page-nav" aria-label="Otros módulos">
+        <a class="page-nav__link" href="index.html">← Mecanismo de acción (Drewe et al., 2026)</a>
+      </nav>
+    </footer>
+  </div>
+
+  <div class="modal-overlay" id="modal-overlay" hidden aria-hidden="true">
+    <div
+      class="modal"
+      id="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-acronym"
+      aria-describedby="modal-body"
+    >
+      <button class="modal__close" id="modal-close" type="button" aria-label="Cerrar"><span aria-hidden="true">X</span></button>
+      <h3 class="modal__acronym" id="modal-acronym"></h3>
+      <p class="modal__full-name" id="modal-full-name"></p>
+      <div class="modal__body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="nutrition.js"></script>
+</body>
+</html>

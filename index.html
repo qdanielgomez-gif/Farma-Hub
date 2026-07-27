@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farma Básica — Selección de fármaco</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <section id="drug-menu" class="drug-menu">
+      <header class="header">
+        <div class="header__text">
+          <h1 class="header__title">Farma Básica</h1>
+          <p class="header__subtitle">Selecciona un fármaco para estudiar</p>
+        </div>
+        <div class="header__actions user-panel" id="user-panel">
+          <div class="user-panel__guest" id="user-guest">
+            <button type="button" class="view-tab user-panel__register" id="btn-open-register">
+              Registrarme
+            </button>
+          </div>
+          <div class="user-panel__logged" id="user-logged" hidden>
+            <span class="header__badge user-panel__badge" id="user-badge">Alumno</span>
+            <button type="button" class="view-tab header__back" id="btn-my-metrics">Mis métricas</button>
+            <button type="button" class="view-tab view-tab--ghost" id="btn-switch-user">Cambiar usuario</button>
+          </div>
+        </div>
+      </header>
+
+      <p class="drug-menu__notice" id="drug-menu-notice">
+        Regístrate para guardar tu progreso, desbloqueos y métricas por alumno.
+      </p>
+
+      <nav class="drug-menu__choices" aria-label="Fármacos disponibles">
+        <button type="button" class="view-tab drug-picker" data-drug="metformina">
+          <span class="drug-picker__title">Metformina</span>
+          <span class="drug-picker__hint">Biguanida · 1ª línea en diabetes tipo 2</span>
+        </button>
+        <button type="button" class="view-tab drug-picker" data-drug="glp1">
+          <span class="drug-picker__title">Agonistas GLP-1</span>
+          <span class="drug-picker__hint">Incretinas · Obesidad y diabetes tipo 2</span>
+        </button>
+      </nav>
+    </section>
+
+    <div id="app-study" class="app-study" hidden>
+      <header class="header">
+        <div class="header__text">
+          <h1 class="header__title" id="drug-title">Fármaco</h1>
+          <p class="header__subtitle" id="drug-subtitle"></p>
+        </div>
+        <div class="header__actions">
+          <button type="button" class="view-tab header__back" id="btn-back-menu">← Fármacos</button>
+          <span class="header__badge" id="module-badge">Módulo activo</span>
+        </div>
+      </header>
+
+      <section id="physiology-lock" class="physiology-lock" hidden aria-label="Candado fisiológico GLP-1">
+        <header class="physiology-lock__header">
+          <h2 class="physiology-lock__title" id="lock-title">Candado fisiológico</h2>
+          <p class="physiology-lock__intro" id="lock-intro"></p>
+        </header>
+
+        <div class="physiology-lock__board">
+          <div class="match-column">
+            <h3 class="match-column__heading">Conceptos</h3>
+            <div class="match-column__list" id="lock-terms"></div>
+          </div>
+          <div class="match-column">
+            <h3 class="match-column__heading">Funciones</h3>
+            <div class="match-column__list" id="lock-definitions"></div>
+          </div>
+        </div>
+
+        <div class="physiology-lock__actions">
+          <button type="button" class="view-tab physiology-lock__submit" id="lock-submit">Comprobar emparejamientos</button>
+          <p class="physiology-lock__hint" id="lock-hint">Selecciona un concepto y luego su función correspondiente.</p>
+        </div>
+
+        <article class="physiology-lock__fail" id="lock-fail" hidden>
+          <p class="physiology-lock__fail-text">Debes leer más</p>
+          <button type="button" class="view-tab physiology-lock__retry" id="lock-retry">Intentar de nuevo</button>
+        </article>
+      </section>
+
+      <div id="study-content" class="study-content">
+      <nav class="view-tabs" role="tablist" aria-label="Secciones de estudio">
+        <button
+          type="button"
+          class="view-tab view-tab--active"
+          id="tab-mechanism"
+          role="tab"
+          aria-selected="true"
+          aria-controls="view-mechanism"
+          data-view="mechanism"
+        >
+          Mecanismo de Acción
+        </button>
+        <button
+          type="button"
+          class="view-tab"
+          id="tab-nutrition"
+          role="tab"
+          aria-selected="false"
+          aria-controls="view-nutrition"
+          data-view="nutrition"
+        >
+          Alteraciones en el estado nutricional
+        </button>
+        <button
+          type="button"
+          class="view-tab"
+          id="tab-side-effects"
+          role="tab"
+          aria-selected="false"
+          aria-controls="view-side-effects"
+          data-view="sideEffects"
+        >
+          Efectos Secundarios
+        </button>
+        <button
+          type="button"
+          class="view-tab"
+          id="tab-architect"
+          role="tab"
+          aria-selected="false"
+          aria-controls="view-architect"
+          data-view="architect"
+          hidden
+        >
+          Modo Arquitecto
+        </button>
+        <button
+          type="button"
+          class="view-tab"
+          id="tab-credibility"
+          role="tab"
+          aria-selected="false"
+          aria-controls="view-credibility"
+          data-view="credibility"
+          hidden
+        >
+          Credibilidad
+        </button>
+      </nav>
+
+      <main class="main view-panel" id="view-mechanism" role="tabpanel" aria-labelledby="tab-mechanism">
+        <section class="diagram-panel" aria-label="Diagrama de mecanismo de acción">
+          <h2 class="visually-hidden">Diagrama interactivo del mecanismo</h2>
+          <div class="diagram" id="diagram" role="tablist" aria-label="Etapas del mecanismo"></div>
+        </section>
+
+        <aside class="study-panel" aria-live="polite">
+          <article class="study-card" id="study-card">
+            <header class="study-card__header">
+              <span class="study-card__step" id="study-step">Paso 1 de 5</span>
+              <h2 class="study-card__title" id="study-title">Fármaco</h2>
+            </header>
+            <ul class="study-card__bullets" id="study-bullets"></ul>
+            <div class="study-card__tip" id="study-tip">
+              <span class="study-card__tip-label">Ojo Clínico / Tip de Examen</span>
+              <p class="study-card__tip-text" id="study-tip-text"></p>
+            </div>
+          </article>
+        </aside>
+      </main>
+
+      <main class="main main--nutrition view-panel" id="view-nutrition" role="tabpanel" aria-labelledby="tab-nutrition" hidden>
+        <section class="nutrition-panel" aria-label="Alteraciones farmaco-nutricionales">
+          <h2 class="nutrition-panel__heading">Cascada causa-efecto</h2>
+          <p class="nutrition-panel__source" id="nutrition-source"></p>
+          <nav class="nutrition-categories" id="nutrition-categories" aria-label="Categorías farmaco-nutricionales"></nav>
+        </section>
+
+        <aside class="study-panel" aria-live="polite">
+          <article class="study-card" id="nutrition-card">
+            <header class="study-card__header">
+              <span class="study-card__step" id="nutrition-category-label">Categoría</span>
+              <h2 class="study-card__title" id="nutrition-title"></h2>
+            </header>
+            <ol class="study-card__cascade" id="nutrition-cascade"></ol>
+            <div class="study-card__tip" id="nutrition-tip">
+              <span class="study-card__tip-label">Ojo Clínico / Tip de Examen</span>
+              <p class="study-card__tip-text" id="nutrition-tip-text"></p>
+            </div>
+          </article>
+        </aside>
+      </main>
+
+      <main class="main main--nutrition view-panel" id="view-side-effects" role="tabpanel" aria-labelledby="tab-side-effects" hidden>
+        <section class="nutrition-panel" aria-label="Efectos secundarios">
+          <h2 class="nutrition-panel__heading">Cascada causa-efecto</h2>
+          <p class="nutrition-panel__source" id="side-effects-source"></p>
+          <nav class="nutrition-categories" id="side-effects-categories" aria-label="Categorías de efectos secundarios"></nav>
+        </section>
+
+        <aside class="study-panel" aria-live="polite">
+          <article class="study-card" id="side-effects-card">
+            <header class="study-card__header">
+              <span class="study-card__step" id="side-effects-category-label">Categoría</span>
+              <h2 class="study-card__title" id="side-effects-title"></h2>
+            </header>
+            <ol class="study-card__cascade" id="side-effects-cascade"></ol>
+            <div class="study-card__tip" id="side-effects-tip">
+              <span class="study-card__tip-label">Ojo Clínico / Tip de Examen</span>
+              <p class="study-card__tip-text" id="side-effects-tip-text"></p>
+            </div>
+          </article>
+        </aside>
+      </main>
+
+      <main class="main main--game view-panel" id="view-architect" role="tabpanel" aria-labelledby="tab-architect" hidden>
+        <section class="game-panel architect-panel" aria-label="Modo Arquitecto">
+          <header class="game-panel__header">
+            <h2 class="game-panel__title" id="architect-title">Modo Arquitecto</h2>
+            <p class="game-panel__intro" id="architect-intro"></p>
+          </header>
+          <div class="architect-canvas" id="architect-canvas" aria-label="Lienzo de ordenamiento"></div>
+          <div class="architect-feedback" id="architect-feedback" aria-live="polite"></div>
+          <div class="architect-toolbox" id="architect-toolbox" aria-label="Piezas disponibles"></div>
+          <div class="game-panel__actions">
+            <button type="button" class="view-tab" id="architect-validate">Validar orden</button>
+            <button type="button" class="view-tab view-tab--ghost" id="architect-reset">Reiniciar</button>
+          </div>
+        </section>
+      </main>
+
+      <main class="main main--game view-panel" id="view-credibility" role="tabpanel" aria-labelledby="tab-credibility" hidden>
+        <section class="game-panel credibility-panel" aria-label="Casos de Credibilidad">
+          <header class="game-panel__header">
+            <h2 class="game-panel__title" id="credibility-title">Casos de Credibilidad</h2>
+            <p class="game-panel__intro" id="credibility-intro"></p>
+          </header>
+
+          <div class="credibility-bar" aria-label="Barra de credibilidad">
+            <div class="credibility-bar__label">
+              <span>Credibilidad clínica</span>
+              <strong id="credibility-percent">100%</strong>
+            </div>
+            <div class="credibility-bar__track">
+              <div class="credibility-bar__fill" id="credibility-fill" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <div id="credibility-play">
+          <div class="credibility-avatar-wrap">
+            <button type="button" class="hub-avatar" id="hub-avatar" aria-label="Avatar clínico">
+              <span class="hub-avatar__face" aria-hidden="true">Rx</span>
+            </button>
+            <div class="hub-avatar-bubble" id="hub-avatar-bubble" hidden role="status" aria-live="polite"></div>
+          </div>
+
+          <article class="credibility-case" id="credibility-case">
+            <span class="credibility-case__badge" id="credibility-case-badge">Paciente 1 de 20</span>
+            <h3 class="credibility-case__title" id="credibility-case-title"></h3>
+            <p class="credibility-case__text" id="credibility-case-text"></p>
+            <div class="credibility-options" id="credibility-options"></div>
+          </article>
+
+          <p class="credibility-result" id="credibility-result" aria-live="polite"></p>
+          </div>
+
+          <article class="credibility-results" id="credibility-results" hidden aria-live="polite">
+            <h3 class="credibility-results__title">Ronda completada</h3>
+            <p class="credibility-results__score" id="credibility-final-score">Ronda terminada. Credibilidad final: 100%</p>
+            <p class="credibility-results__meta" id="credibility-final-meta"></p>
+            <button type="button" class="view-tab" id="credibility-new-round">Comenzar nueva ronda</button>
+          </article>
+        </section>
+      </main>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="professor-overlay" hidden aria-hidden="true">
+    <div class="modal modal--wide professor-panel" id="professor-panel" role="dialog" aria-modal="true" aria-labelledby="professor-title">
+      <button class="modal__close" id="professor-close" type="button" aria-label="Cerrar panel del profesor"><span aria-hidden="true">X</span></button>
+      <h3 class="modal__acronym" id="professor-title">Panel del profesor</h3>
+      <p class="modal__full-name">Datos de localStorage · GLP-1</p>
+      <div class="professor-grid" id="professor-stats"></div>
+      <p class="professor-hint">Atajo: Shift + P</p>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="user-register-overlay" hidden aria-hidden="true">
+    <div class="modal" id="user-register-modal" role="dialog" aria-modal="true" aria-labelledby="register-title">
+      <button class="modal__close" id="register-close" type="button" aria-label="Cerrar"><span aria-hidden="true">X</span></button>
+      <h3 class="modal__acronym" id="register-title">Registro de alumno</h3>
+      <p class="modal__full-name">Tu progreso se guardará en este dispositivo.</p>
+      <form class="register-form" id="register-form">
+        <label class="register-form__label" for="register-name">Nombre completo</label>
+        <input class="register-form__input" id="register-name" name="name" type="text" required minlength="2" maxlength="80" autocomplete="name" placeholder="Ej. Ana García">
+        <label class="register-form__label" for="register-id">Matrícula o ID (opcional)</label>
+        <input class="register-form__input" id="register-id" name="studentId" type="text" maxlength="32" autocomplete="off" placeholder="Ej. A01234567">
+        <button type="submit" class="view-tab register-form__submit">Entrar y guardar métricas</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="user-metrics-overlay" hidden aria-hidden="true">
+    <div class="modal modal--wide" id="user-metrics-modal" role="dialog" aria-modal="true" aria-labelledby="user-metrics-title">
+      <button class="modal__close" id="user-metrics-close" type="button" aria-label="Cerrar"><span aria-hidden="true">X</span></button>
+      <h3 class="modal__acronym" id="user-metrics-title">Mis métricas</h3>
+      <p class="modal__full-name" id="user-metrics-subtitle"></p>
+      <div class="professor-grid" id="user-metrics-stats"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-overlay" hidden aria-hidden="true">
+    <div
+      class="modal"
+      id="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-acronym"
+      aria-describedby="modal-body"
+    >
+      <button class="modal__close" id="modal-close" type="button" aria-label="Cerrar"><span aria-hidden="true">X</span></button>
+      <h3 class="modal__acronym" id="modal-acronym"></h3>
+      <p class="modal__full-name" id="modal-full-name"></p>
+      <div class="modal__body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="data-drugs.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
