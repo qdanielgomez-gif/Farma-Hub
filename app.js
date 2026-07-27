@@ -317,6 +317,7 @@ const els = {
   userMetricsClose: document.getElementById("user-metrics-close"),
   userMetricsSubtitle: document.getElementById("user-metrics-subtitle"),
   userMetricsStats: document.getElementById("user-metrics-stats"),
+  btnDownloadMetricsPdf: document.getElementById("btn-download-metrics-pdf"),
   appStudy: document.getElementById("app-study"),
   btnBackMenu: document.getElementById("btn-back-menu"),
   drugPickers: document.querySelectorAll(".drug-picker"),
@@ -729,9 +730,8 @@ function updateUserPanelUI() {
   if (els.drugMenuNotice) {
     els.drugMenuNotice.hidden = registered;
     if (!registered) {
-      els.drugMenuNotice.textContent = serverSyncEnabled
-        ? "Regístrate con tu matrícula. El progreso se guarda en el servidor del curso."
-        : "Regístrate con tu matrícula: es tu ID único para recuperar progreso en este navegador.";
+      els.drugMenuNotice.textContent =
+        "Regístrate con tu matrícula. Al terminar, descarga el PDF de métricas y envíaselo a tu profesor.";
     }
   }
 }
@@ -842,17 +842,17 @@ function switchUser() {
   openRegisterModal();
 }
 
-function buildMetricsCardsHtml(drugStats, drugLabel) {
+function summarizeDrugMetrics(drugStats) {
   const lockAttempts = drugStats.lock?.attempts ?? 0;
-  const lockPassed = drugStats.lock?.passed ? "Sí" : "No";
+  const lockPassed = drugStats.lock?.passed === true;
   const architectRuns = drugStats.architect ?? [];
   const architectSuccess = architectRuns.filter((r) => r.success).length;
   const architectRate =
-    architectRuns.length > 0 ? Math.round((architectSuccess / architectRuns.length) * 100) : 0;
-  const architectAvg =
+    architectRuns.length > 0 ? Math.round((architectSuccess / architectRuns.length) * 100) : null;
+  const architectAvgMs =
     architectRuns.length > 0
       ? architectRuns.reduce((sum, r) => sum + (r.timeMs || 0), 0) / architectRuns.length
-      : 0;
+      : null;
   const credibilityStats = drugStats.credibility ?? { attempts: 0, runs: [] };
   const credibilityRuns = credibilityStats.runs ?? [];
   const credibilityAvg =
@@ -860,25 +860,171 @@ function buildMetricsCardsHtml(drugStats, drugLabel) {
       ? Math.round(
           credibilityRuns.reduce((sum, r) => sum + (r.finalScore || 0), 0) / credibilityRuns.length
         )
-      : 0;
+      : null;
+
+  return {
+    lockAttempts,
+    lockPassed,
+    architectRuns: architectRuns.length,
+    architectSuccess,
+    architectRate,
+    architectAvgMs,
+    credibilityRounds: credibilityStats.attempts ?? 0,
+    credibilityRuns,
+    credibilityAvg,
+    hasActivity:
+      lockAttempts > 0 ||
+      architectRuns.length > 0 ||
+      (credibilityStats.attempts ?? 0) > 0 ||
+      lockPassed,
+  };
+}
+
+function buildMetricsCardsHtml(drugStats, drugLabel) {
+  const summary = summarizeDrugMetrics(drugStats);
 
   return `
     <article class="professor-card professor-card--lavender">
       <h4 class="professor-card__title">${drugLabel} · Candado</h4>
-      <p class="professor-card__value">${lockAttempts}</p>
-      <p class="professor-card__meta">Intentos · Desbloqueado: ${lockPassed}</p>
+      <p class="professor-card__value">${summary.lockAttempts}</p>
+      <p class="professor-card__meta">Intentos · Desbloqueado: ${summary.lockPassed ? "Sí" : "No"}</p>
     </article>
     <article class="professor-card professor-card--teal">
       <h4 class="professor-card__title">${drugLabel} · Arquitecto</h4>
-      <p class="professor-card__value">${architectRate}%</p>
-      <p class="professor-card__meta">${architectSuccess}/${architectRuns.length} éxitos · ${formatDuration(architectAvg)}</p>
+      <p class="professor-card__value">${summary.architectRate ?? 0}%</p>
+      <p class="professor-card__meta">${summary.architectSuccess}/${summary.architectRuns} éxitos · ${formatDuration(summary.architectAvgMs)}</p>
     </article>
     <article class="professor-card professor-card--yellow">
       <h4 class="professor-card__title">${drugLabel} · Credibilidad</h4>
-      <p class="professor-card__value">${credibilityAvg}%</p>
-      <p class="professor-card__meta">${credibilityStats.attempts ?? 0} rondas · Promedio final</p>
+      <p class="professor-card__value">${summary.credibilityAvg ?? 0}%</p>
+      <p class="professor-card__meta">${summary.credibilityRounds} rondas · Promedio final</p>
     </article>
   `;
+}
+
+function formatReportDate(timestamp = Date.now()) {
+  return new Date(timestamp).toLocaleString("es-MX", {
+    dateStyle: "long",
+    timeStyle: "short",
+  });
+}
+
+function slugifyFilename(text) {
+  return String(text)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+function writePdfSection(doc, title, lines, yStart) {
+  let y = yStart;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 18;
+  const lineHeight = 6;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text(title, margin, y);
+  y += lineHeight + 1;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10.5);
+  lines.forEach((line) => {
+    if (y > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+    }
+    doc.text(line, margin + 2, y);
+    y += lineHeight;
+  });
+
+  return y + 4;
+}
+
+function buildDrugPdfLines(summary) {
+  const lines = [
+    `Candado fisiologico: ${summary.lockAttempts} intento(s) · Desbloqueado: ${summary.lockPassed ? "Si" : "No"}`,
+    `Modo Arquitecto: ${summary.architectSuccess}/${summary.architectRuns} exitos (${summary.architectRate ?? 0}%) · Promedio: ${formatDuration(summary.architectAvgMs)}`,
+    `Credibilidad: ${summary.credibilityRounds} ronda(s) · Promedio final: ${summary.credibilityAvg ?? "—"}%`,
+  ];
+
+  if (summary.credibilityRuns.length > 0) {
+    lines.push("Detalle de rondas de credibilidad:");
+    summary.credibilityRuns.slice(-8).forEach((run, index) => {
+      const label = summary.credibilityRuns.length > 8
+        ? summary.credibilityRuns.length - 8 + index + 1
+        : index + 1;
+      lines.push(`  · Ronda ${label}: ${run.finalScore ?? "—"}% (${formatReportDate(run.at || Date.now())})`);
+    });
+  }
+
+  if (!summary.hasActivity) {
+    lines.push("Sin actividad registrada en este modulo.");
+  }
+
+  return lines;
+}
+
+function downloadMetricsPdf() {
+  const profile = getActiveUserProfile();
+  if (!profile) {
+    openRegisterModal();
+    return;
+  }
+
+  const jsPdfLib = window.jspdf?.jsPDF;
+  if (!jsPdfLib) {
+    window.alert("No se pudo cargar el generador de PDF. Recarga la pagina e intenta de nuevo.");
+    return;
+  }
+
+  const stats = readStats();
+  const glp1Summary = summarizeDrugMetrics(stats.glp1 ?? createDefaultDrugStats());
+  const metforminaSummary = summarizeDrugMetrics(stats.metformina ?? createDefaultDrugStats());
+  const generatedAt = Date.now();
+
+  const doc = new jsPdfLib({ orientation: "portrait", unit: "mm", format: "a4" });
+  const margin = 18;
+  let y = margin;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("Farma Basica", margin, y);
+  y += 8;
+
+  doc.setFontSize(13);
+  doc.text("Reporte de progreso del alumno", margin, y);
+  y += 10;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.text(`Nombre: ${profile.name}`, margin, y);
+  y += 6;
+  doc.text(`Matricula: ${profile.studentId || "—"}`, margin, y);
+  y += 6;
+  doc.text(`Fecha del reporte: ${formatReportDate(generatedAt)}`, margin, y);
+  y += 10;
+
+  y = writePdfSection(doc, "Agonistas GLP-1", buildDrugPdfLines(glp1Summary), y);
+
+  if (metforminaSummary.hasActivity) {
+    y = writePdfSection(doc, "Metformina", buildDrugPdfLines(metforminaSummary), y);
+  }
+
+  if (y > doc.internal.pageSize.getHeight() - 24) {
+    doc.addPage();
+    y = margin;
+  }
+
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(9.5);
+  doc.text("Documento generado desde la app Farma Basica. Enviar este PDF al profesor/a del curso.", margin, y + 4);
+
+  const datePart = new Date(generatedAt).toISOString().slice(0, 10);
+  const idPart = profile.studentId ? slugifyFilename(profile.studentId) : slugifyFilename(profile.name);
+  doc.save(`FarmaBasica_${idPart}_${datePart}.pdf`);
 }
 
 function renderUserMetricsPanel() {
@@ -2052,6 +2198,7 @@ function bindGlobalEvents() {
   els.btnBackMenu.addEventListener("click", showDrugMenu);
   els.btnOpenRegister?.addEventListener("click", openRegisterModal);
   els.btnMyMetrics?.addEventListener("click", openUserMetricsPanel);
+  els.btnDownloadMetricsPdf?.addEventListener("click", downloadMetricsPdf);
   els.btnSwitchUser?.addEventListener("click", switchUser);
   els.registerForm?.addEventListener("submit", handleRegisterSubmit);
   els.registerDeviceUsers?.addEventListener("click", (e) => {

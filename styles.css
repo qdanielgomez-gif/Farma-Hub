@@ -1493,3 +1493,20 @@ body {
 .professor-auth[hidden] {
   display: none !important;
 }
+
+.user-metrics-actions {
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: var(--border);
+}
+
+.user-metrics-actions__pdf {
+  width: 100%;
+}
+
+.user-metrics-actions__hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #555;
+}
