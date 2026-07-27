@@ -310,6 +310,8 @@ const els = {
   registerForm: document.getElementById("register-form"),
   registerName: document.getElementById("register-name"),
   registerStudentId: document.getElementById("register-id"),
+  registerFeedback: document.getElementById("register-feedback"),
+  registerDeviceUsers: document.getElementById("register-device-users"),
   registerClose: document.getElementById("register-close"),
   userMetricsOverlay: document.getElementById("user-metrics-overlay"),
   userMetricsClose: document.getElementById("user-metrics-close"),
@@ -387,6 +389,10 @@ const els = {
   professorOverlay: document.getElementById("professor-overlay"),
   professorClose: document.getElementById("professor-close"),
   professorStats: document.getElementById("professor-stats"),
+  professorAuth: document.getElementById("professor-auth"),
+  professorKeyInput: document.getElementById("professor-key-input"),
+  professorKeySubmit: document.getElementById("professor-key-submit"),
+  professorSubtitle: document.getElementById("professor-subtitle"),
   modalOverlay: document.getElementById("modal-overlay"),
   modalClose: document.getElementById("modal-close"),
   modalAcronym: document.getElementById("modal-acronym"),
@@ -405,8 +411,125 @@ const VIEW_LABELS = {
 const STORAGE_KEY = "farmaBasica_stats";
 const USERS_KEY = "farmaBasica_users";
 const ACTIVE_USER_KEY = "farmaBasica_activeUser";
+const PROFESSOR_KEY_STORAGE = "farmaBasica_professorKey";
 
 let activeUserId = null;
+let serverSyncEnabled = false;
+let statsPushTimer = null;
+let professorApiKey = sessionStorage.getItem(PROFESSOR_KEY_STORAGE) || "";
+
+function getApiBase() {
+  const configured = window.FARMA_API_URL;
+  if (configured === false || configured === "off") return null;
+  if (typeof configured === "string" && configured.length > 0) {
+    return configured.replace(/\/$/, "");
+  }
+  if (
+    location.port === "3000" &&
+    (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+  ) {
+    return "";
+  }
+  // Mismo origen: Render sirve la app y la API juntas
+  if (location.hostname.endsWith(".onrender.com")) {
+    return "";
+  }
+  return null;
+}
+
+async function apiFetch(path, options = {}) {
+  const base = getApiBase();
+  if (base === null) return null;
+
+  const response = await fetch(`${base}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Error HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function initServerConnection() {
+  serverSyncEnabled = getApiBase() !== null;
+  if (!serverSyncEnabled || !activeUserId) return;
+  await pullStatsFromServer();
+}
+
+async function syncSessionOnServer(name, studentId) {
+  if (!serverSyncEnabled) return null;
+
+  try {
+    const data = await apiFetch("/api/session", {
+      method: "POST",
+      body: JSON.stringify({ name, studentId }),
+    });
+
+    if (data?.stats && data.userId) {
+      const store = readAllStatsStore();
+      store[data.userId] = data.stats;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    }
+
+    return data;
+  } catch (error) {
+    console.warn("No se pudo sincronizar la sesión con el servidor:", error);
+    return null;
+  }
+}
+
+async function pullStatsFromServer() {
+  if (!serverSyncEnabled || !activeUserId) return;
+
+  try {
+    const data = await apiFetch(`/api/session/stats?userId=${encodeURIComponent(activeUserId)}`);
+    if (data?.stats) {
+      const store = readAllStatsStore();
+      store[activeUserId] = data.stats;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    }
+  } catch (error) {
+    console.warn("No se pudo descargar progreso del servidor:", error);
+  }
+}
+
+function scheduleServerStatsPush() {
+  if (!serverSyncEnabled || !activeUserId) return;
+  window.clearTimeout(statsPushTimer);
+  statsPushTimer = window.setTimeout(() => {
+    pushStatsToServer();
+  }, 450);
+}
+
+async function pushStatsToServer() {
+  if (!serverSyncEnabled || !activeUserId) return;
+
+  try {
+    await apiFetch("/api/session/stats", {
+      method: "PUT",
+      body: JSON.stringify({
+        userId: activeUserId,
+        stats: readStats(),
+      }),
+    });
+  } catch (error) {
+    console.warn("No se pudo guardar progreso en el servidor:", error);
+  }
+}
+
+async function fetchProfessorDataFromServer(key) {
+  if (!serverSyncEnabled) return null;
+  return apiFetch("/api/students", {
+    headers: { "X-Professor-Key": key },
+  });
+}
 
 const ABBREV_ALIASES = {
   "complejo I": "Cx I",
@@ -420,8 +543,21 @@ function getActiveModule() {
   return activeDrugId ? DRUG_MODULES[activeDrugId] : null;
 }
 
-function getActiveModule() {
-  return activeDrugId ? DRUG_MODULES[activeDrugId] : null;
+function normalizeStudentId(studentId) {
+  return String(studentId).trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function userIdFromStudentId(studentId) {
+  const matricula = normalizeStudentId(studentId);
+  if (!matricula || matricula.length < 3) return null;
+  return `student-${matricula.replace(/[^A-Z0-9]/g, "")}`;
+}
+
+function findUserIdByStudentId(studentId) {
+  const userId = userIdFromStudentId(studentId);
+  if (!userId) return null;
+  const registry = readUsersRegistry();
+  return registry.users[userId] ? userId : null;
 }
 
 function slugifyUserId(text) {
@@ -513,6 +649,7 @@ function writeStats(stats) {
   const store = readAllStatsStore();
   store[activeUserId] = stats;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  scheduleServerStatsPush();
 }
 
 function createDefaultDrugStats() {
@@ -526,16 +663,25 @@ function createDefaultDrugStats() {
 
 function registerUser(name, studentId = "") {
   const trimmed = name.trim();
-  if (trimmed.length < 2) return null;
+  const matricula = normalizeStudentId(studentId);
+
+  if (trimmed.length < 2) {
+    return { ok: false, message: "Escribe tu nombre completo." };
+  }
+  if (!matricula || matricula.length < 3) {
+    return { ok: false, message: "La matrícula es obligatoria (mínimo 3 caracteres)." };
+  }
 
   const registry = readUsersRegistry();
-  const base = slugifyUserId(trimmed) || "alumno";
-  let userId = `${base}-${Date.now().toString(36).slice(-4)}`;
+  const userId = userIdFromStudentId(matricula);
+  const existing = registry.users[userId];
+  const resumed = Boolean(existing);
 
   registry.users[userId] = {
     name: trimmed,
-    studentId: studentId.trim(),
-    registeredAt: Date.now(),
+    studentId: matricula,
+    registeredAt: existing?.registeredAt ?? Date.now(),
+    lastLoginAt: Date.now(),
   };
   writeUsersRegistry(registry);
   setActiveUser(userId);
@@ -545,7 +691,19 @@ function registerUser(name, studentId = "") {
     store[userId] = {};
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   }
-  return userId;
+
+  return {
+    ok: true,
+    resumed,
+    userId,
+    message: resumed
+      ? serverSyncEnabled
+        ? "¡Bienvenido de nuevo! Recuperamos tu progreso desde el servidor."
+        : "¡Bienvenido de nuevo! Recuperamos tu progreso guardado en este navegador."
+      : serverSyncEnabled
+        ? "Cuenta creada. Tu progreso se guardará en el servidor."
+        : "Cuenta creada. Tu progreso quedará ligado a esta matrícula en este dispositivo.",
+  };
 }
 
 function isUserRegistered() {
@@ -570,15 +728,71 @@ function updateUserPanelUI() {
 
   if (els.drugMenuNotice) {
     els.drugMenuNotice.hidden = registered;
+    if (!registered) {
+      els.drugMenuNotice.textContent = serverSyncEnabled
+        ? "Regístrate con tu matrícula. El progreso se guarda en el servidor del curso."
+        : "Regístrate con tu matrícula: es tu ID único para recuperar progreso en este navegador.";
+    }
   }
+}
+
+function renderRegisterDeviceUsers() {
+  if (!els.registerDeviceUsers) return;
+  const registry = readUsersRegistry();
+  const entries = Object.entries(registry.users)
+    .filter(([, profile]) => profile.studentId)
+    .sort((a, b) => (b[1].lastLoginAt || b[1].registeredAt) - (a[1].lastLoginAt || a[1].registeredAt));
+
+  if (entries.length === 0) {
+    els.registerDeviceUsers.innerHTML = "";
+    els.registerDeviceUsers.hidden = true;
+    return;
+  }
+
+  els.registerDeviceUsers.hidden = false;
+  els.registerDeviceUsers.innerHTML = `
+    <p class="register-device-users__heading">Cuentas en este navegador</p>
+    ${entries
+      .map(
+        ([id, profile]) => `
+      <button type="button" class="view-tab view-tab--ghost register-device-users__btn" data-resume-user="${id}">
+        Continuar como ${escapeHtml(profile.name)} · ${escapeHtml(profile.studentId)}
+      </button>
+    `
+      )
+      .join("")}
+  `;
+}
+
+function resumeExistingUser(userId) {
+  const registry = readUsersRegistry();
+  const profile = registry.users[userId];
+  if (!profile) return;
+  profile.lastLoginAt = Date.now();
+  writeUsersRegistry(registry);
+  setActiveUser(userId);
+  if (serverSyncEnabled) {
+    pullStatsFromServer().finally(() => {
+      closeRegisterModal();
+      updateUserPanelUI();
+    });
+    return;
+  }
+  closeRegisterModal();
+  updateUserPanelUI();
 }
 
 function openRegisterModal() {
   if (!els.userRegisterOverlay) return;
+  renderRegisterDeviceUsers();
+  if (els.registerFeedback) {
+    els.registerFeedback.textContent = "";
+    els.registerFeedback.hidden = true;
+  }
   els.userRegisterOverlay.hidden = false;
   els.userRegisterOverlay.setAttribute("aria-hidden", "false");
   document.body.style.overflow = "hidden";
-  els.registerName?.focus();
+  els.registerStudentId?.focus();
 }
 
 function closeRegisterModal() {
@@ -590,14 +804,34 @@ function closeRegisterModal() {
   }
 }
 
-function handleRegisterSubmit(event) {
+async function handleRegisterSubmit(event) {
   event.preventDefault();
   const name = els.registerName?.value ?? "";
   const studentId = els.registerStudentId?.value ?? "";
-  if (registerUser(name, studentId)) {
-    els.registerForm?.reset();
-    closeRegisterModal();
-    updateUserPanelUI();
+  const result = registerUser(name, studentId);
+
+  if (result.ok && serverSyncEnabled) {
+    const serverSession = await syncSessionOnServer(name, studentId);
+    if (serverSession?.resumed) {
+      result.resumed = true;
+      result.message = "¡Bienvenido de nuevo! Recuperamos tu progreso desde el servidor.";
+    } else if (serverSession) {
+      result.message = "Cuenta creada. Tu progreso se guardará en el servidor.";
+    }
+  }
+
+  if (els.registerFeedback) {
+    els.registerFeedback.hidden = false;
+    els.registerFeedback.textContent = result.message ?? "";
+    els.registerFeedback.dataset.type = result.ok ? (result.resumed ? "resume" : "new") : "error";
+  }
+
+  if (result.ok) {
+    window.setTimeout(() => {
+      els.registerForm?.reset();
+      closeRegisterModal();
+      updateUserPanelUI();
+    }, result.resumed ? 900 : 500);
   }
 }
 
@@ -893,8 +1127,11 @@ function renderDrugContent() {
 }
 
 function init() {
+  serverSyncEnabled = getApiBase() !== null;
   loadActiveUser();
-  updateUserPanelUI();
+  initServerConnection().finally(() => {
+    updateUserPanelUI();
+  });
   showDrugMenu();
   bindGlobalEvents();
 }
@@ -1608,16 +1845,14 @@ function resetCredibility() {
 }
 
 /* ── Panel del profesor ── */
-function renderProfessorPanel() {
-  const registry = readUsersRegistry();
-  const store = readAllStatsStore();
+function renderProfessorCards(registry, store) {
   const userIds = Object.keys(registry.users);
 
   if (userIds.length === 0) {
     els.professorStats.innerHTML = `
       <article class="professor-card professor-card--lavender">
         <h4 class="professor-card__title">Sin alumnos registrados</h4>
-        <p class="professor-card__meta">Los datos aparecerán cuando se registren desde el menú principal.</p>
+        <p class="professor-card__meta">Los datos aparecerán cuando los alumnos entren con su matrícula.</p>
       </article>
     `;
     return;
@@ -1649,12 +1884,78 @@ function renderProfessorPanel() {
     .join("");
 }
 
+function updateProfessorSubtitle() {
+  if (!els.professorSubtitle) return;
+  els.professorSubtitle.textContent = serverSyncEnabled
+    ? "Datos del servidor · todos los alumnos del curso"
+    : "Datos de este navegador · activa el servidor para ver a todos";
+}
+
+function setProfessorAuthVisible(visible) {
+  if (!els.professorAuth) return;
+  els.professorAuth.hidden = !visible;
+  if (visible) {
+    els.professorStats.innerHTML = "";
+    els.professorKeyInput?.focus();
+  }
+}
+
+async function loadProfessorPanelData() {
+  updateProfessorSubtitle();
+
+  if (serverSyncEnabled && !professorApiKey) {
+    setProfessorAuthVisible(true);
+    return;
+  }
+
+  setProfessorAuthVisible(false);
+
+  if (serverSyncEnabled) {
+    try {
+      const data = await fetchProfessorDataFromServer(professorApiKey);
+      renderProfessorCards({ users: data.users }, data.stats);
+      return;
+    } catch (error) {
+      professorApiKey = "";
+      sessionStorage.removeItem(PROFESSOR_KEY_STORAGE);
+      els.professorStats.innerHTML = `
+        <article class="professor-card professor-card--lavender">
+          <h4 class="professor-card__title">No se pudo cargar</h4>
+          <p class="professor-card__meta">${escapeHtml(error.message || "Error de conexión")}</p>
+        </article>
+      `;
+      setProfessorAuthVisible(true);
+      return;
+    }
+  }
+
+  renderProfessorCards(readUsersRegistry(), readAllStatsStore());
+}
+
+async function handleProfessorAuthSubmit(event) {
+  event.preventDefault();
+  const key = els.professorKeyInput?.value?.trim() ?? "";
+  if (!key) return;
+
+  professorApiKey = key;
+  sessionStorage.setItem(PROFESSOR_KEY_STORAGE, key);
+  await loadProfessorPanelData();
+}
+
+async function renderProfessorPanel() {
+  await loadProfessorPanelData();
+}
+
 function openProfessorPanel() {
   renderProfessorPanel();
   els.professorOverlay.hidden = false;
   els.professorOverlay.setAttribute("aria-hidden", "false");
   document.body.style.overflow = "hidden";
-  els.professorClose.focus();
+  if (serverSyncEnabled && !professorApiKey) {
+    els.professorKeyInput?.focus();
+  } else {
+    els.professorClose.focus();
+  }
 }
 
 function closeProfessorPanel() {
@@ -1723,6 +2024,7 @@ function bindGlobalEvents() {
     if (e.target === els.modalOverlay) closeModal();
   });
   els.professorClose?.addEventListener("click", closeProfessorPanel);
+  els.professorAuth?.addEventListener("submit", handleProfessorAuthSubmit);
   els.professorOverlay?.addEventListener("click", (e) => {
     if (e.target === els.professorOverlay) closeProfessorPanel();
   });
@@ -1752,6 +2054,10 @@ function bindGlobalEvents() {
   els.btnMyMetrics?.addEventListener("click", openUserMetricsPanel);
   els.btnSwitchUser?.addEventListener("click", switchUser);
   els.registerForm?.addEventListener("submit", handleRegisterSubmit);
+  els.registerDeviceUsers?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-resume-user]");
+    if (btn) resumeExistingUser(btn.dataset.resumeUser);
+  });
   els.registerClose?.addEventListener("click", closeRegisterModal);
   els.userRegisterOverlay?.addEventListener("click", (e) => {
     if (e.target === els.userRegisterOverlay) closeRegisterModal();

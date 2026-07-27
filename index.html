@@ -32,7 +32,7 @@
       </header>
 
       <p class="drug-menu__notice" id="drug-menu-notice">
-        Regístrate para guardar tu progreso, desbloqueos y métricas por alumno.
+        Regístrate con tu matrícula: es tu ID único para recuperar progreso en este navegador.
       </p>
 
       <nav class="drug-menu__choices" aria-label="Fármacos disponibles">
@@ -280,22 +280,30 @@
     <div class="modal modal--wide professor-panel" id="professor-panel" role="dialog" aria-modal="true" aria-labelledby="professor-title">
       <button class="modal__close" id="professor-close" type="button" aria-label="Cerrar panel del profesor"><span aria-hidden="true">X</span></button>
       <h3 class="modal__acronym" id="professor-title">Panel del profesor</h3>
-      <p class="modal__full-name">Datos de localStorage · GLP-1</p>
+      <p class="modal__full-name" id="professor-subtitle">Datos del servidor · todos los alumnos</p>
+      <form class="professor-auth" id="professor-auth" hidden>
+        <label class="register-form__label" for="professor-key-input">Clave de profesor</label>
+        <input class="register-form__input" id="professor-key-input" type="password" autocomplete="off" placeholder="La configuraste al iniciar el servidor">
+        <button type="submit" class="view-tab register-form__submit" id="professor-key-submit">Ver progreso de todos</button>
+      </form>
       <div class="professor-grid" id="professor-stats"></div>
-      <p class="professor-hint">Atajo: Shift + P</p>
+      <p class="professor-hint">Atajo: Shift + P · Clave por defecto: <code>farma-prof</code></p>
     </div>
   </div>
 
   <div class="modal-overlay" id="user-register-overlay" hidden aria-hidden="true">
     <div class="modal" id="user-register-modal" role="dialog" aria-modal="true" aria-labelledby="register-title">
       <button class="modal__close" id="register-close" type="button" aria-label="Cerrar"><span aria-hidden="true">X</span></button>
-      <h3 class="modal__acronym" id="register-title">Registro de alumno</h3>
-      <p class="modal__full-name">Tu progreso se guardará en este dispositivo.</p>
+      <h3 class="modal__acronym" id="register-title">Entrar como alumno</h3>
+      <p class="modal__full-name">Tu matrícula es tu ID único. Mismo navegador + misma matrícula = mismo progreso.</p>
+      <div class="register-device-users" id="register-device-users" hidden></div>
       <form class="register-form" id="register-form">
+        <label class="register-form__label" for="register-id">Matrícula o ID universitario</label>
+        <input class="register-form__input" id="register-id" name="studentId" type="text" required minlength="3" maxlength="32" autocomplete="username" placeholder="Ej. A01234567">
         <label class="register-form__label" for="register-name">Nombre completo</label>
-        <input class="register-form__input" id="register-name" name="name" type="text" required minlength="2" maxlength="80" autocomplete="name" placeholder="Ej. Ana García">
-        <label class="register-form__label" for="register-id">Matrícula o ID (opcional)</label>
-        <input class="register-form__input" id="register-id" name="studentId" type="text" maxlength="32" autocomplete="off" placeholder="Ej. A01234567">
+        <input class="register-form__input" id="register-name" name="name" type="text" required minlength="2" maxlength="80" autocomplete="name" placeholder="Ej. Daniel Gómez">
+        <p class="register-form__hint">Si ya te registraste antes con esta matrícula aquí, no se reinicia nada: entras a tu cuenta guardada.</p>
+        <p class="register-form__feedback" id="register-feedback" hidden role="status" aria-live="polite"></p>
         <button type="submit" class="view-tab register-form__submit">Entrar y guardar métricas</button>
       </form>
     </div>
@@ -326,6 +334,14 @@
     </div>
   </div>
 
+  <script>
+    // ── Configuración del servidor ──
+    // GitHub Pages solo sirve la interfaz (HTML/CSS/JS), no puede correr Node.
+    // Opción A: app + API en Render (recomendado) → deja esto vacío si abres la URL de Render.
+    // Opción B: interfaz en GitHub Pages + API en Render → pon la URL de Render aquí:
+    // window.FARMA_API_URL = "https://farma-basica.onrender.com";
+    window.FARMA_API_URL = "";
+  </script>
   <script src="data-drugs.js"></script>
   <script src="app.js"></script>
 </body>
