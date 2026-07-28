@@ -24,9 +24,14 @@
             </button>
           </div>
           <div class="user-panel__logged" id="user-logged" hidden>
-            <span class="header__badge user-panel__badge" id="user-badge">Alumno</span>
-            <button type="button" class="view-tab header__back" id="btn-my-metrics">Mis métricas</button>
-            <button type="button" class="view-tab view-tab--ghost" id="btn-switch-user">Cambiar usuario</button>
+            <div class="user-panel__identity header__badge" id="user-identity">
+              <span class="user-panel__name" id="user-badge-name">Alumno</span>
+              <span class="user-panel__id" id="user-badge-id"></span>
+            </div>
+            <div class="user-panel__buttons">
+              <button type="button" class="view-tab header__back" id="btn-my-metrics">Mis métricas</button>
+              <button type="button" class="view-tab view-tab--ghost" id="btn-switch-user">Cambiar usuario</button>
+            </div>
           </div>
         </div>
       </header>
@@ -319,7 +324,7 @@
         <button type="button" class="view-tab user-metrics-actions__pdf" id="btn-download-metrics-pdf">
           Descargar PDF para el profesor
         </button>
-        <p class="user-metrics-actions__hint">Genera un reporte con tu nombre, matrícula y resultados. Envíalo por correo o WhatsApp.</p>
+        <p class="user-metrics-actions__hint">Incluye metricas y recomendaciones de que temas repasar. Solo aparece Metformina si ya la estudiaste.</p>
       </div>
     </div>
   </div>

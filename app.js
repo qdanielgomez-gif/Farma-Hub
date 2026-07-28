@@ -27,7 +27,9 @@ let credibilityAnswered = false;
 let credibilityFinished = false;
 
 const CREDIBILITY_ROUND_SIZE = 20;
+const CREDIBILITY_FAIL_THRESHOLD = 55;
 let credibilityRoundCases = [];
+let credibilityAdvanceTimer = null;
 
 /** Banco de casos — Pestaña Credibilidad (teoría pestañas 1–3 GLP-1) */
 const CREDIBILITY_CASES = [
@@ -301,7 +303,8 @@ const els = {
   drugMenu: document.getElementById("drug-menu"),
   userGuest: document.getElementById("user-guest"),
   userLogged: document.getElementById("user-logged"),
-  userBadge: document.getElementById("user-badge"),
+  userBadgeName: document.getElementById("user-badge-name"),
+  userBadgeId: document.getElementById("user-badge-id"),
   drugMenuNotice: document.getElementById("drug-menu-notice"),
   btnOpenRegister: document.getElementById("btn-open-register"),
   btnMyMetrics: document.getElementById("btn-my-metrics"),
@@ -717,9 +720,12 @@ function updateUserPanelUI() {
   if (els.userLogged) els.userLogged.hidden = !registered;
 
   const profile = getActiveUserProfile();
-  if (registered && els.userBadge && profile) {
-    const idHint = profile.studentId ? ` · ${profile.studentId}` : "";
-    els.userBadge.textContent = `${profile.name}${idHint}`;
+  if (registered && profile) {
+    if (els.userBadgeName) els.userBadgeName.textContent = profile.name;
+    if (els.userBadgeId) {
+      els.userBadgeId.textContent = profile.studentId ? `Matrícula ${profile.studentId}` : "";
+      els.userBadgeId.hidden = !profile.studentId;
+    }
   }
 
   els.drugPickers?.forEach((btn) => {
@@ -855,12 +861,7 @@ function summarizeDrugMetrics(drugStats) {
       : null;
   const credibilityStats = drugStats.credibility ?? { attempts: 0, runs: [] };
   const credibilityRuns = credibilityStats.runs ?? [];
-  const credibilityAvg =
-    credibilityRuns.length > 0
-      ? Math.round(
-          credibilityRuns.reduce((sum, r) => sum + (r.finalScore || 0), 0) / credibilityRuns.length
-        )
-      : null;
+  const credibilityAvg = getCredibilityAverage(credibilityStats);
 
   return {
     lockAttempts,
@@ -869,13 +870,13 @@ function summarizeDrugMetrics(drugStats) {
     architectSuccess,
     architectRate,
     architectAvgMs,
-    credibilityRounds: credibilityStats.attempts ?? 0,
+    credibilityRounds: credibilityRuns.length,
     credibilityRuns,
     credibilityAvg,
     hasActivity:
       lockAttempts > 0 ||
       architectRuns.length > 0 ||
-      (credibilityStats.attempts ?? 0) > 0 ||
+      (credibilityRuns.length ?? 0) > 0 ||
       lockPassed,
   };
 }
@@ -897,7 +898,7 @@ function buildMetricsCardsHtml(drugStats, drugLabel) {
     <article class="professor-card professor-card--yellow">
       <h4 class="professor-card__title">${drugLabel} · Credibilidad</h4>
       <p class="professor-card__value">${summary.credibilityAvg ?? 0}%</p>
-      <p class="professor-card__meta">${summary.credibilityRounds} rondas · Promedio final</p>
+      <p class="professor-card__meta">${summary.credibilityRounds} intento(s) · Promedio de intentos</p>
     </article>
   `;
 }
@@ -918,53 +919,284 @@ function slugifyFilename(text) {
     .slice(0, 40);
 }
 
-function writePdfSection(doc, title, lines, yStart) {
-  let y = yStart;
+const PDF_COLORS = {
+  cream: [251, 249, 241],
+  black: [24, 24, 27],
+  yellow: [253, 224, 147],
+  teal: [42, 157, 143],
+  lavender: [199, 184, 234],
+  coral: [244, 162, 97],
+  sky: [168, 218, 220],
+  white: [255, 255, 255],
+  muted: [68, 68, 68],
+};
+
+function pdfSetFill(doc, rgb) {
+  doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+}
+
+function pdfSetStroke(doc, rgb) {
+  doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
+}
+
+function pdfSetText(doc, rgb) {
+  doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+}
+
+function pdfTextColorForCard(fillRgb) {
+  return fillRgb === PDF_COLORS.teal ? PDF_COLORS.white : PDF_COLORS.black;
+}
+
+function pdfMetaColorForCard(fillRgb) {
+  return fillRgb === PDF_COLORS.teal ? [230, 245, 243] : PDF_COLORS.muted;
+}
+
+function pdfEnsureSpace(doc, y, needed, margin) {
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 18;
-  const lineHeight = 6;
+  if (y + needed <= pageHeight - margin) return y;
+  doc.addPage();
+  pdfPaintPageBackground(doc);
+  return margin;
+}
+
+function pdfPaintPageBackground(doc) {
+  pdfSetFill(doc, PDF_COLORS.cream);
+  doc.rect(0, 0, doc.internal.pageSize.getWidth(), doc.internal.pageSize.getHeight(), "F");
+}
+
+function pdfDrawShadowRect(doc, x, y, w, h, fillRgb, shadow = 1.8) {
+  pdfSetFill(doc, PDF_COLORS.black);
+  doc.rect(x + shadow, y + shadow, w, h, "F");
+  pdfSetFill(doc, fillRgb);
+  pdfSetStroke(doc, PDF_COLORS.black);
+  doc.setLineWidth(0.55);
+  doc.rect(x, y, w, h, "FD");
+}
+
+function pdfSafeText(text) {
+  return String(text)
+    .replace(/\u2192/g, " -> ")
+    .replace(/·/g, " | ")
+    .replace(/—/g, "-");
+}
+
+function pdfMeasureLines(doc, text, maxWidth, fontSize = 8.8) {
+  doc.setFontSize(fontSize);
+  return doc.splitTextToSize(pdfSafeText(text), maxWidth);
+}
+
+function pdfDrawRecommendationsSection(doc, y, title, tips, margin, contentWidth) {
+  if (tips.length === 0) return y;
+
+  y = pdfEnsureSpace(doc, y, 24, margin);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text(title, margin, y);
-  y += lineHeight + 1;
+  pdfSetText(doc, PDF_COLORS.black);
+  doc.text(pdfSafeText(title), margin, y);
+  y += 6;
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10.5);
-  lines.forEach((line) => {
-    if (y > pageHeight - margin) {
-      doc.addPage();
-      y = margin;
-    }
-    doc.text(line, margin + 2, y);
-    y += lineHeight;
+  const textX = margin + 4;
+  const textWidth = contentWidth - 8;
+  const lineHeight = 4.2;
+
+  tips.forEach((tip, index) => {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.8);
+    const bodyLines = pdfMeasureLines(doc, tip, textWidth - 6, 8.8);
+    const firstLine = `${index + 1}. ${bodyLines[0] ?? ""}`;
+    const restLines = bodyLines.slice(1);
+    const allDisplayLines = [firstLine, ...restLines.map((line) => `   ${line}`)];
+    const paddingTop = 4;
+    const paddingBottom = 3.5;
+    const boxH = paddingTop + allDisplayLines.length * lineHeight + paddingBottom;
+
+    y = pdfEnsureSpace(doc, y, boxH + 4, margin);
+    pdfDrawShadowRect(doc, margin, y, contentWidth, boxH, index % 2 === 0 ? PDF_COLORS.sky : PDF_COLORS.coral);
+
+    pdfSetText(doc, PDF_COLORS.black);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.8);
+    allDisplayLines.forEach((line, lineIndex) => {
+      doc.text(line, textX, y + paddingTop + 3 + lineIndex * lineHeight);
+    });
+
+    y += boxH + 4;
   });
 
   return y + 4;
 }
 
-function buildDrugPdfLines(summary) {
-  const lines = [
-    `Candado fisiologico: ${summary.lockAttempts} intento(s) · Desbloqueado: ${summary.lockPassed ? "Si" : "No"}`,
-    `Modo Arquitecto: ${summary.architectSuccess}/${summary.architectRuns} exitos (${summary.architectRate ?? 0}%) · Promedio: ${formatDuration(summary.architectAvgMs)}`,
-    `Credibilidad: ${summary.credibilityRounds} ronda(s) · Promedio final: ${summary.credibilityAvg ?? "—"}%`,
-  ];
-
-  if (summary.credibilityRuns.length > 0) {
-    lines.push("Detalle de rondas de credibilidad:");
-    summary.credibilityRuns.slice(-8).forEach((run, index) => {
-      const label = summary.credibilityRuns.length > 8
-        ? summary.credibilityRuns.length - 8 + index + 1
-        : index + 1;
-      lines.push(`  · Ronda ${label}: ${run.finalScore ?? "—"}% (${formatReportDate(run.at || Date.now())})`);
-    });
-  }
+function buildGlp1Recommendations(summary) {
+  const tips = [];
 
   if (!summary.hasActivity) {
-    lines.push("Sin actividad registrada en este modulo.");
+    tips.push("Completa el modulo GLP-1: candado fisiologico, Modo Arquitecto y ronda de Credibilidad.");
+    return tips;
   }
 
-  return lines;
+  if (!summary.lockPassed) {
+    tips.push(
+      "Candado fisiologico: repasa emparejamiento incretinas-GLP-1, glucosa postprandial, receptor y senalizacion cAMP/PKA."
+    );
+  } else if (summary.lockAttempts > 2) {
+    tips.push("Candado superado con varios intentos: repasa definiciones de semaglutida, tirzepatida y fisiologia intestinal.");
+  }
+
+  if (summary.architectRuns === 0) {
+    tips.push(
+      "Modo Arquitecto: practica la secuencia Farmaco -> Receptor GLP-1 -> Organo diana -> Efecto clinico."
+    );
+  } else if (summary.architectRate !== null && summary.architectRate < 80) {
+    tips.push(
+      "Mecanismo de accion: refuerza la pestaña Mecanismo (receptor acoplado a Gi/Gs, pancreas, SNC, estomago)."
+    );
+  }
+
+  if (summary.credibilityRounds === 0) {
+    tips.push("Credibilidad: realiza la ronda de 20 casos para integrar mecanismo, nutricion y efectos adversos.");
+  } else if (summary.credibilityAvg !== null && summary.credibilityAvg < 70) {
+    tips.push(
+      "Credibilidad baja: repasa pestañas Nutricion (saciedad, vaciamiento gastrico) y Efectos secundarios (GI, pancreatitis, litiasis)."
+    );
+    tips.push("Enfocate en titulacion lenta, red flags abdominales y contraindicaciones MEN2/CMT.");
+  } else if (summary.credibilityAvg !== null && summary.credibilityAvg < 85) {
+    tips.push(
+      "Credibilidad moderada: refuerza diferencias entre moleculas, interacciones y manejo de efectos GI."
+    );
+  }
+
+  if (
+    summary.lockPassed &&
+    (summary.architectRate ?? 0) >= 80 &&
+    (summary.credibilityAvg ?? 0) >= 85
+  ) {
+    tips.push("Excelente desempeno. Refuerza casos avanzados: IR acida, interaccion con insulina y seguridad pancreatica.");
+  }
+
+  if (tips.length === 0) {
+    tips.push("Sigue repasando las 5 pestañas del modulo antes de la evaluacion formal.");
+  }
+
+  return tips;
+}
+
+function buildMetforminaRecommendations(summary) {
+  if (!summary.hasActivity) {
+    return [
+      "Metformina: recorre Mecanismo de accion (AMPK, higado) y Alteraciones nutricionales (B12, peso).",
+    ];
+  }
+  return [
+    "Metformina: repasa transporte OCT1/OCT2, contraindicaciones renales y monitorizacion de vitamina B12.",
+  ];
+}
+
+function pdfDrawMetricCard(doc, x, y, w, title, value, meta, fillRgb) {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  const metaLines = pdfMeasureLines(doc, meta, w - 8, 8.5);
+  const h = Math.max(28, 20 + metaLines.length * 3.8);
+  pdfDrawShadowRect(doc, x, y, w, h, fillRgb);
+  const textColor = pdfTextColorForCard(fillRgb);
+  const metaColor = pdfMetaColorForCard(fillRgb);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  pdfSetText(doc, textColor);
+  doc.text(pdfSafeText(title), x + 3, y + 6);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text(pdfSafeText(String(value)), x + 3, y + 15);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  pdfSetText(doc, metaColor);
+  metaLines.forEach((line, index) => {
+    doc.text(line, x + 3, y + 21 + index * 3.8);
+  });
+
+  return h;
+}
+
+function pdfDrawDrugModuleSection(doc, y, drugLabel, summary, margin, contentWidth) {
+  y = pdfEnsureSpace(doc, y, 48, margin);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  pdfSetText(doc, PDF_COLORS.black);
+  doc.text(pdfSafeText(drugLabel), margin, y);
+  y += 8;
+
+  const cardW = (contentWidth - 8) / 3;
+  const architectValue =
+    summary.architectRuns === 0 ? "-" : `${summary.architectRate ?? 0}%`;
+  const architectMeta =
+    summary.architectRuns === 0
+      ? "Sin partidas aun"
+      : `${summary.architectSuccess}/${summary.architectRuns} exitos | ${formatDuration(summary.architectAvgMs)}`;
+  const credibilityValue =
+    summary.credibilityAvg === null ? "-" : `${summary.credibilityAvg}%`;
+
+  const cardHeights = [
+    pdfDrawMetricCard(
+      doc,
+      margin,
+      y,
+      cardW,
+      "Candado",
+      summary.lockPassed ? "OK" : summary.lockAttempts,
+      summary.lockPassed
+        ? `${summary.lockAttempts} intento(s) | Desbloqueado`
+        : `${summary.lockAttempts} intento(s) | Pendiente`,
+      PDF_COLORS.lavender
+    ),
+    pdfDrawMetricCard(
+      doc,
+      margin + cardW + 4,
+      y,
+      cardW,
+      "Arquitecto",
+      architectValue,
+      architectMeta,
+      PDF_COLORS.teal
+    ),
+    pdfDrawMetricCard(
+      doc,
+      margin + (cardW + 4) * 2,
+      y,
+      cardW,
+      "Credibilidad",
+      credibilityValue,
+      `${summary.credibilityRounds} intento(s) | Promedio de intentos`,
+      PDF_COLORS.yellow
+    ),
+  ];
+  y += Math.max(...cardHeights) + 8;
+
+  if (summary.credibilityRuns.length > 0) {
+    const recentRuns = summary.credibilityRuns.slice(-5);
+    const boxH = 8 + recentRuns.length * 4.5;
+    y = pdfEnsureSpace(doc, y, boxH + 4, margin);
+    pdfDrawShadowRect(doc, margin, y, contentWidth, boxH, PDF_COLORS.white);
+    y += 5;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    pdfSetText(doc, PDF_COLORS.black);
+    doc.text("Ultimas rondas de credibilidad", margin + 3, y);
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    recentRuns.forEach((run, index) => {
+      const num = summary.credibilityRuns.length - recentRuns.length + index + 1;
+      doc.text(pdfSafeText(`Ronda ${num}: ${run.finalScore ?? "-"}% | ${formatReportDate(run.at || Date.now())}`), margin + 3, y);
+      y += 4.5;
+    });
+    y += 6;
+  }
+
+  return y;
 }
 
 function downloadMetricsPdf() {
@@ -983,44 +1215,87 @@ function downloadMetricsPdf() {
   const stats = readStats();
   const glp1Summary = summarizeDrugMetrics(stats.glp1 ?? createDefaultDrugStats());
   const metforminaSummary = summarizeDrugMetrics(stats.metformina ?? createDefaultDrugStats());
+
+  const hasGlp1Progress =
+    glp1Summary.lockPassed ||
+    glp1Summary.architectRuns > 0 ||
+    glp1Summary.credibilityRounds > 0;
+
+  if (!hasGlp1Progress) {
+    window.alert("Completa al menos una actividad del modulo GLP-1 (candado, arquitecto o credibilidad) antes de generar el reporte.");
+    return;
+  }
+
+  const glp1Tips = buildGlp1Recommendations(glp1Summary);
+  const metforminaTips = buildMetforminaRecommendations(metforminaSummary);
   const generatedAt = Date.now();
 
   const doc = new jsPdfLib({ orientation: "portrait", unit: "mm", format: "a4" });
-  const margin = 18;
-  let y = margin;
+  const margin = 16;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const contentWidth = pageWidth - margin * 2;
+  pdfPaintPageBackground(doc);
+
+  pdfDrawShadowRect(doc, margin, margin, contentWidth, 34, PDF_COLORS.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  pdfSetText(doc, PDF_COLORS.black);
+  doc.text("Farma Basica", margin + 4, margin + 11);
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "normal");
+  pdfSetText(doc, PDF_COLORS.muted);
+  doc.text("Reporte de progreso del alumno", margin + 4, margin + 18);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
-  doc.text("Farma Basica", margin, y);
-  y += 8;
-
-  doc.setFontSize(13);
-  doc.text("Reporte de progreso del alumno", margin, y);
-  y += 10;
+  doc.setFontSize(10.5);
+  pdfSetText(doc, PDF_COLORS.black);
+  doc.text(profile.name, margin + 4, margin + 26);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Matricula: ${profile.studentId || "—"}`, margin + 4, margin + 31);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-  doc.text(`Nombre: ${profile.name}`, margin, y);
-  y += 6;
-  doc.text(`Matricula: ${profile.studentId || "—"}`, margin, y);
-  y += 6;
-  doc.text(`Fecha del reporte: ${formatReportDate(generatedAt)}`, margin, y);
-  y += 10;
+  doc.setFontSize(8.5);
+  pdfSetText(doc, PDF_COLORS.muted);
+  const dateText = formatReportDate(generatedAt);
+  doc.text(dateText, pageWidth - margin - 4, margin + 31, { align: "right" });
 
-  y = writePdfSection(doc, "Agonistas GLP-1", buildDrugPdfLines(glp1Summary), y);
+  let y = margin + 42;
+
+  y = pdfDrawDrugModuleSection(doc, y, "Agonistas GLP-1", glp1Summary, margin, contentWidth);
+  y = pdfDrawRecommendationsSection(
+    doc,
+    y,
+    "Recomendaciones de estudio | GLP-1",
+    glp1Tips,
+    margin,
+    contentWidth
+  );
 
   if (metforminaSummary.hasActivity) {
-    y = writePdfSection(doc, "Metformina", buildDrugPdfLines(metforminaSummary), y);
+    y = pdfDrawDrugModuleSection(doc, y + 4, "Metformina", metforminaSummary, margin, contentWidth);
+    y = pdfDrawRecommendationsSection(
+      doc,
+      y,
+      "Recomendaciones de estudio | Metformina",
+      metforminaTips,
+      margin,
+      contentWidth
+    );
   }
 
-  if (y > doc.internal.pageSize.getHeight() - 24) {
-    doc.addPage();
-    y = margin;
-  }
-
+  y = pdfEnsureSpace(doc, y, 14, margin);
+  const footerText =
+    "Envia este PDF a tu profesor/a. Las recomendaciones se basan en tu desempeno en la app.";
   doc.setFont("helvetica", "italic");
-  doc.setFontSize(9.5);
-  doc.text("Documento generado desde la app Farma Basica. Enviar este PDF al profesor/a del curso.", margin, y + 4);
+  doc.setFontSize(8.5);
+  const footerLines = pdfMeasureLines(doc, footerText, contentWidth - 8, 8.5);
+  const footerH = 6 + footerLines.length * 4;
+  pdfDrawShadowRect(doc, margin, y, contentWidth, footerH, PDF_COLORS.lavender);
+  pdfSetText(doc, PDF_COLORS.black);
+  footerLines.forEach((line, index) => {
+    doc.text(line, margin + 4, y + 5 + index * 4);
+  });
 
   const datePart = new Date(generatedAt).toISOString().slice(0, 10);
   const idPart = profile.studentId ? slugifyFilename(profile.studentId) : slugifyFilename(profile.name);
@@ -1097,7 +1372,26 @@ function shuffleArray(items) {
   return arr;
 }
 
+function clearCredibilityAdvanceTimer() {
+  if (credibilityAdvanceTimer) {
+    window.clearTimeout(credibilityAdvanceTimer);
+    credibilityAdvanceTimer = null;
+  }
+}
+
+function getCredibilityAverage(credibilityStats) {
+  const runs = credibilityStats?.runs ?? [];
+  if (runs.length === 0) return null;
+  return Math.round(runs.reduce((sum, run) => sum + (run.finalScore || 0), 0) / runs.length);
+}
+
+function applyCredibilityDelta(delta) {
+  credibilityScore = Math.max(0, Math.min(100, credibilityScore + delta));
+  return credibilityScore;
+}
+
 function resetInteractiveState() {
+  clearCredibilityAdvanceTimer();
   lockSelectedTermId = null;
   lockMatches = {};
   architectCanvasOrder = [];
@@ -1824,6 +2118,7 @@ function resetArchitect() {
 
 /* ── Casos de Credibilidad (Pestaña 5) ── */
 function initCredibilityRound() {
+  clearCredibilityAdvanceTimer();
   credibilityScore = 100;
   credibilityCaseIndex = 0;
   credibilityAnswered = false;
@@ -1841,25 +2136,58 @@ function setCredibilityPlayVisible(showPlay) {
   if (els.credibilityResults) els.credibilityResults.hidden = showPlay;
 }
 
-function saveCredibilityRoundResult() {
+function saveCredibilityRoundResult(outcome = "completed") {
   const stats = getDrugStats();
   if (!stats.credibility) stats.credibility = { attempts: 0, runs: [] };
-  const finalScore = Math.max(0, Math.min(100, credibilityScore));
-  stats.credibility.attempts += 1;
-  stats.credibility.runs.push({ finalScore, at: Date.now() });
+  const finalScore = Math.max(0, Math.min(100, Math.round(credibilityScore)));
+  stats.credibility.runs.push({ finalScore, at: Date.now(), outcome });
+  stats.credibility.attempts = stats.credibility.runs.length;
   saveDrugStats(activeDrugId, stats);
+  return finalScore;
+}
+
+function restartCredibilityAfterFail() {
+  const stats = getDrugStats();
+  const attempts = stats.credibility?.runs?.length ?? 0;
+  const avg = getCredibilityAverage(stats.credibility);
+  initCredibilityRound();
+  renderCredibility();
+  if (els.credibilityResult) {
+    els.credibilityResult.textContent = `Casos nuevos. Intento ${attempts + 1} · Promedio acumulado: ${avg ?? "-"}%`;
+  }
+}
+
+function handleCredibilityEarlyFail() {
+  const finalScore = saveCredibilityRoundResult("failed");
+  const stats = getDrugStats();
+  const avg = getCredibilityAverage(stats.credibility);
+
+  if (els.credibilityResult) {
+    els.credibilityResult.textContent = `Intento terminado en ${finalScore}% (minimo ${CREDIBILITY_FAIL_THRESHOLD + 1}% para continuar).`;
+  }
+  pokeHubAvatar(
+    "critical",
+    `Credibilidad en ${finalScore}%. Intento registrado. Repasa teoria y reiniciamos con casos nuevos.`
+  );
+
+  credibilityAdvanceTimer = window.setTimeout(() => {
+    credibilityAdvanceTimer = null;
+    credibilityAnswered = false;
+    restartCredibilityAfterFail();
+  }, 1800);
 }
 
 function finishCredibilityRound() {
+  clearCredibilityAdvanceTimer();
   credibilityFinished = true;
-  saveCredibilityRoundResult();
-  const finalScore = Math.max(0, Math.min(100, credibilityScore));
+  const finalScore = saveCredibilityRoundResult("completed");
   const stats = getDrugStats();
+  const avg = getCredibilityAverage(stats.credibility);
   if (els.credibilityFinalScore) {
-    els.credibilityFinalScore.textContent = `Ronda terminada. Credibilidad final: ${finalScore}%`;
+    els.credibilityFinalScore.textContent = `Ronda completada. Credibilidad final: ${finalScore}%`;
   }
   if (els.credibilityFinalMeta) {
-    els.credibilityFinalMeta.textContent = `Intentos totales registrados: ${stats.credibility?.attempts ?? 1}`;
+    els.credibilityFinalMeta.textContent = `Intentos registrados: ${stats.credibility?.runs?.length ?? 1} · Promedio de intentos: ${avg ?? finalScore}%`;
   }
   setCredibilityPlayVisible(false);
   updateCredibilityBar();
@@ -1889,7 +2217,8 @@ function pokeHubAvatar(mood, message) {
 }
 
 function updateCredibilityBar() {
-  const clamped = Math.max(0, Math.min(100, credibilityScore));
+  credibilityScore = Math.max(0, Math.min(100, credibilityScore));
+  const clamped = credibilityScore;
   if (els.credibilityPercent) els.credibilityPercent.textContent = `${clamped}%`;
   if (els.credibilityFill) {
     els.credibilityFill.style.width = `${clamped}%`;
@@ -1908,7 +2237,7 @@ function renderCredibility() {
 
   const dict = data.abbreviations ?? {};
   els.credibilityTitle.textContent = data.title;
-  els.credibilityIntro.innerHTML = linkifyAbbreviations(data.intro, dict);
+  els.credibilityIntro.innerHTML = `${linkifyAbbreviations(data.intro, dict)} <strong>Si la credibilidad baja a ${CREDIBILITY_FAIL_THRESHOLD}% o menos, el intento termina, se registra y comienzan casos nuevos.</strong>`;
   updateCredibilityBar();
 
   if (credibilityFinished) {
@@ -1951,8 +2280,10 @@ function handleCredibilityChoice(optionId) {
   const option = currentCase?.options.find((o) => o.id === optionId);
   if (!option) return;
 
+  clearCredibilityAdvanceTimer();
   credibilityAnswered = true;
-  credibilityScore += option.delta;
+  const scoreBefore = credibilityScore;
+  applyCredibilityDelta(option.delta);
   updateCredibilityBar();
   pokeHubAvatar(option.type, option.avatar);
 
@@ -1965,15 +2296,22 @@ function handleCredibilityChoice(optionId) {
   });
 
   const deltaLabel = option.delta > 0 ? `+${option.delta}%` : `${option.delta}%`;
-  els.credibilityResult.textContent = `Credibilidad ${deltaLabel}.`;
+  els.credibilityResult.textContent = `Credibilidad ${deltaLabel} (${scoreBefore}% → ${credibilityScore}%).`;
 
-  window.setTimeout(() => {
+  if (credibilityScore <= CREDIBILITY_FAIL_THRESHOLD) {
+    handleCredibilityEarlyFail();
+    return;
+  }
+
+  credibilityAdvanceTimer = window.setTimeout(() => {
+    credibilityAdvanceTimer = null;
     credibilityCaseIndex += 1;
     credibilityAnswered = false;
     els.credibilityResult.textContent = "";
 
     if (credibilityCaseIndex >= CREDIBILITY_ROUND_SIZE) {
       finishCredibilityRound();
+      renderCredibility();
       return;
     }
 
@@ -2011,18 +2349,15 @@ function renderProfessorCards(registry, store) {
       const glp1 = userStats.glp1 ?? createDefaultDrugStats();
       const cred = glp1.credibility ?? { attempts: 0, runs: [] };
       const runs = cred.runs ?? [];
-      const avg =
-        runs.length > 0
-          ? Math.round(runs.reduce((s, r) => s + (r.finalScore || 0), 0) / runs.length)
-          : "—";
+      const avg = getCredibilityAverage(cred);
       const idLine = profile.studentId ? ` · ${profile.studentId}` : "";
       return `
         <article class="professor-card professor-card--yellow">
           <h4 class="professor-card__title">${escapeHtml(profile.name)}${escapeHtml(idLine)}</h4>
-          <p class="professor-card__value">${avg}${avg === "—" ? "" : "%"}</p>
+          <p class="professor-card__value">${avg ?? "—"}${avg === null ? "" : "%"}</p>
           <p class="professor-card__meta">
             Candado: ${glp1.lock?.passed ? "✓" : "—"} (${glp1.lock?.attempts ?? 0} intentos) ·
-            Credibilidad: ${cred.attempts ?? 0} rondas
+            Credibilidad: ${runs.length} intento(s) · Promedio ${avg ?? "—"}${avg === null ? "" : "%"}
           </p>
         </article>
       `;

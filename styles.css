@@ -112,8 +112,21 @@ body {
 .header__actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-end;
   gap: 0.6rem;
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+@media (min-width: 720px) {
+  .header {
+    align-items: center;
+  }
+
+  .header__actions {
+    align-items: center;
+  }
 }
 
 .header__back {
@@ -965,21 +978,62 @@ body {
 
 .user-panel__logged {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (min-width: 560px) {
+  .user-panel__logged {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    width: auto;
+  }
+}
+
+.user-panel__buttons {
+  display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.user-panel__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.5rem 0.9rem;
+  white-space: normal;
+  max-width: 100%;
+  line-height: 1.25;
+}
+
+.user-panel__identity.header__badge {
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.user-panel__name {
+  font-size: 0.86rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.user-panel__id {
+  font-size: 0.74rem;
+  font-weight: 600;
+  opacity: 0.88;
+  overflow-wrap: anywhere;
 }
 
 .user-panel__logged[hidden],
 .user-panel__guest[hidden] {
   display: none !important;
-}
-
-.user-panel__badge {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .drug-picker--disabled,
